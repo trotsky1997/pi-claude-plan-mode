@@ -9,6 +9,7 @@ A Pi extension package that recreates the core feel of Claude Code's plan mode:
 - optional fresh-session implementation handoff
 - plan-file continuity when re-entering planning later
 - safe plan review flow that opens the full plan in Pi's built-in editor and then asks for the next action
+- optional AskUserQuestion integration for Claude-style clarifying questions during planning
 - prompt text separated into a dedicated file for easy tweaking
 
 ## What it reproduces
@@ -19,9 +20,10 @@ This package intentionally mirrors the parts of Claude Code plan mode that map w
 2. The agent gets a strong planning prompt with a canonical plan artifact.
 3. Normal file-editing tools are removed during planning.
 4. Only read-only tools plus plan tools stay active.
-5. Bash is filtered to block obvious mutating commands.
-6. The model must use `request_plan_approval` instead of asking for approval in plain text.
-7. Approval can continue in-place or branch into a fresh implementation session.
+5. If `AskUserQuestion` is installed, plan mode keeps it active for structured clarifying questions.
+6. Bash is filtered to block obvious mutating commands.
+7. The model must use `request_plan_approval` instead of asking for approval in plain text.
+8. Approval can continue in-place or branch into a fresh implementation session.
 
 ## Where the prompt lives
 
@@ -62,6 +64,10 @@ Flag:
 - `enter_plan_mode`
 - `update_plan`
 - `request_plan_approval`
+
+If `pi-claude-code-ask-user` is also loaded, plan mode additionally keeps:
+
+- `AskUserQuestion`
 
 Suggested flow:
 
@@ -146,8 +152,19 @@ So this package uses a pragmatic Pi-native design:
 
 - built-in `edit` and `write` are disabled during planning
 - a custom `update_plan` tool is the only write path
+- if available, `AskUserQuestion` is the preferred clarifying-question path during planning
 - approval uses a safer built-in flow: review the plan in Pi's editor, then prompt for the next action
 - fresh-session handoff is emulated with `ctx.newSession()` plus a queued internal slash command
+
+## Recommended pairing
+
+For a closer Claude-style planning loop, load `pi-claude-code-ask-user` alongside this package:
+
+```bash
+pi install -l /home/aka/pi-playground/pi-claude-code-ask-user
+```
+
+When that package is available, the plan-mode prompt nudges the model to use `AskUserQuestion` for genuine requirement or preference questions instead of plain-text back-and-forth.
 
 ## Notes for prompt hacking
 

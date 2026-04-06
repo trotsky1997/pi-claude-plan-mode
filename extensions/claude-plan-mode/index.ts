@@ -66,7 +66,11 @@ const STATE_ENTRY = "claude-plan-mode-state";
 const PLAN_CONTEXT_MESSAGE = "claude-plan-mode-context";
 const PLAN_STATUS_WIDGET = "claude-plan-mode-widget";
 const PLAN_STATUS_KEY = "claude-plan-mode-status";
-const PLAN_ONLY_TOOLS = ["update_plan", "request_plan_approval"] as const;
+const ASK_USER_TOOL_CANDIDATES = ["AskUserQuestion"] as const;
+// Keep enter_plan_mode and update_plan active outside plan mode so the model
+// can enter planning proactively and write the plan in the same turn.
+const PLAN_TRANSITION_TOOLS = ["enter_plan_mode", "update_plan"] as const;
+const PLAN_ONLY_TOOLS = ["request_plan_approval"] as const;
 const READ_ONLY_TOOL_CANDIDATES = ["read", "bash", "grep", "find", "ls"] as const;
 const DEFAULT_EXECUTION_TOOLS = ["read", "bash", "edit", "write"] as const;
 const PLAN_DIR = [".pi", "claude-plan-mode", "plans"] as const;
@@ -86,7 +90,7 @@ function normalizeToolList(pi: ExtensionAPI, tools: string[] | undefined): strin
   return (tools ?? []).filter((tool) => available.has(tool));
 }
 
-function stripPlanOnlyTools(tools: string[]): string[] {
+function stripApprovalOnlyTools(tools: string[]): string[] {
   return tools.filter((tool) => !PLAN_ONLY_TOOLS.includes(tool as (typeof PLAN_ONLY_TOOLS)[number]));
 }
 
@@ -136,15 +140,23 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
   function getExecutionTools(): string[] {
     const saved = state.previousActiveTools && state.previousActiveTools.length > 0
       ? state.previousActiveTools
-      : stripPlanOnlyTools(pi.getActiveTools());
-    const normalized = normalizeToolList(pi, stripPlanOnlyTools(saved));
+      : stripApprovalOnlyTools(pi.getActiveTools());
+    const normalized = normalizeToolList(pi, [
+      ...stripApprovalOnlyTools(saved),
+      ...PLAN_TRANSITION_TOOLS,
+    ]);
     if (normalized.length > 0) return normalized;
-    return normalizeToolList(pi, [...DEFAULT_EXECUTION_TOOLS]);
+    return normalizeToolList(pi, [...DEFAULT_EXECUTION_TOOLS, ...PLAN_TRANSITION_TOOLS]);
   }
 
   function getPlanModeTools(): string[] {
     const available = new Set(pi.getAllTools().map((tool) => tool.name));
-    return [...READ_ONLY_TOOL_CANDIDATES, ...PLAN_ONLY_TOOLS].filter((tool) =>
+    return [
+      ...READ_ONLY_TOOL_CANDIDATES,
+      ...ASK_USER_TOOL_CANDIDATES,
+      ...PLAN_TRANSITION_TOOLS,
+      ...PLAN_ONLY_TOOLS,
+    ].filter((tool) =>
       available.has(tool),
     );
   }
@@ -168,7 +180,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
     ctx.ui.setWidget(PLAN_STATUS_WIDGET, [
       "Claude-style plan mode is active.",
       `Plan file: ${getDisplayPath(ctx, state.planPath)}`,
-      "Only read-only tools plus the plan tools are enabled.",
+      "Only read-only tools plus the planning/question tools are enabled.",
     ]);
   }
 
@@ -180,7 +192,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
     if (!state.enabled) {
       state.previousActiveTools = normalizeToolList(
         pi,
-        stripPlanOnlyTools(pi.getActiveTools()),
+        stripApprovalOnlyTools(pi.getActiveTools()),
       );
     }
     const reentering = !!state.hasExited && existsSync(planPath);
@@ -205,6 +217,13 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
   }
 
   async function restoreFromBranch(ctx: ExtensionContext): Promise<void> {
+    await restoreFromBranchWithOptions(ctx);
+  }
+
+  async function restoreFromBranchWithOptions(
+    ctx: ExtensionContext,
+    options?: { allowFlagBootstrap?: boolean },
+  ): Promise<void> {
     state = createEmptyState();
     let changed = false;
 
@@ -230,10 +249,16 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
       }
     }
 
-    if (pi.getFlag("claude-plan") === true && !state.enabled) {
+    if (
+      options?.allowFlagBootstrap &&
+      pi.getFlag("claude-plan") === true &&
+      !state.enabled &&
+      !state.hasExited &&
+      !state.planPath
+    ) {
       state.previousActiveTools = normalizeToolList(
         pi,
-        stripPlanOnlyTools(pi.getActiveTools()),
+        stripApprovalOnlyTools(pi.getActiveTools()),
       );
       state.enabled = true;
       changed = true;
@@ -353,6 +378,20 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         justReentered: false,
       };
 
+      const previousState: PlanModeState = {
+        enabled: state.enabled,
+        planPath: state.planPath,
+        previousActiveTools: state.previousActiveTools
+          ? [...state.previousActiveTools]
+          : undefined,
+        lastReason: state.lastReason,
+        hasExited: state.hasExited,
+        justReentered: state.justReentered,
+        pendingImplementation: state.pendingImplementation
+          ? { ...state.pendingImplementation }
+          : undefined,
+      };
+
       state.pendingImplementation = undefined;
       state.enabled = false;
       state.hasExited = true;
@@ -367,7 +406,11 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
       });
 
       if (newSessionResult.cancelled) {
-        ctx.ui.notify("Fresh implementation session cancelled.", "info");
+        state = previousState;
+        persistState();
+        applyToolState();
+        updateUi(ctx);
+        ctx.ui.notify("Fresh implementation session cancelled. Approved handoff is still queued.", "info");
         return;
       }
 
@@ -463,7 +506,9 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
       ctx: ExtensionContext,
     ) {
       if (!state.enabled) {
-        throw new Error("update_plan can only be used while plan mode is active.");
+        throw new Error(
+          "update_plan can only be used while plan mode is active. Call enter_plan_mode first.",
+        );
       }
 
       const planPath = state.planPath ?? (await ensurePlanFile(ctx));
@@ -545,6 +590,21 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
 
       while (typeof reviewed === "string") {
         if (reviewed !== plan) {
+          if (!reviewed.trim()) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "The reviewed plan is empty. Stay in plan mode and rebuild the plan before requesting approval again.",
+                },
+              ],
+              details: {
+                approved: false,
+                planPath,
+                reason: "empty-plan",
+              },
+            };
+          }
           plan = reviewed;
           await writePlanFile(planPath, plan);
         }
@@ -562,9 +622,29 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
           planPath: displayPlanPath,
           summary: params.summary,
         });
+        if (typeof reviewed !== "string") {
+          action = "cancel";
+          break;
+        }
       }
 
-      if (action === "keep-planning" || action === "cancel") {
+      if (action === "cancel") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Plan review was cancelled. Stay in plan mode and wait for the user's next instruction.",
+            },
+          ],
+          details: {
+            approved: false,
+            cancelled: true,
+            planPath,
+          },
+        };
+      }
+
+      if (action === "keep-planning") {
         const feedback = await ctx.ui.input(
           "Optional feedback for the next planning pass:",
           "Add constraints or leave blank",
@@ -593,7 +673,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         };
         exitPlanMode(ctx);
         ctx.ui.notify("Plan approved. Fresh implementation session queued.", "info");
-        pi.sendUserMessage("/claude-plan-apply-fresh", { deliverAs: "followUp" });
+        pi.sendUserMessage("/claude-plan-apply-fresh", { deliverAs: "steer" });
 
         return {
           content: [
@@ -699,8 +779,10 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
     };
   });
 
-  pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
-    await restoreFromBranch(ctx);
+  pi.on("session_start", async (event: any, ctx: ExtensionContext) => {
+    await restoreFromBranchWithOptions(ctx, {
+      allowFlagBootstrap: event?.reason === "startup",
+    });
   });
 
   pi.on("session_switch", async (_event: unknown, ctx: ExtensionContext) => {

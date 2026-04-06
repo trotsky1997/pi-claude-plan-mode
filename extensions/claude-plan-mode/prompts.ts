@@ -45,6 +45,7 @@ Hard rules:
 - Use update_plan to keep the full markdown plan current as your understanding improves.
 - Do NOT ask for plan approval in plain text.
 - Do NOT ask questions that you could answer by reading the code.
+- If the AskUserQuestion tool is available, use it for clarifying questions instead of plain text.
 - If you need approval, use request_plan_approval.
 
 Plan file:
@@ -61,7 +62,7 @@ Repeat this cycle until the plan is complete:
 
 1. Explore - Read a few relevant files and look for existing functions, modules, and patterns to reuse.
 2. Update the plan file - After each meaningful discovery, rewrite the plan so it stays current. Do not wait until the end.
-3. Ask the user - When you hit an ambiguity that code alone cannot resolve, ask a targeted clarifying question. Then continue the loop.
+3. Ask the user - When you hit an ambiguity that code alone cannot resolve, ask a targeted clarifying question. Prefer AskUserQuestion when that tool is available. Then continue the loop.
 
 ### First Turn
 
@@ -72,6 +73,7 @@ Start by quickly scanning a few key files to form an initial understanding of th
 - Never ask what you could find out by reading the code.
 - Batch related questions together when possible.
 - Focus on things only the user can answer: requirements, preferences, tradeoffs, and edge-case priorities.
+- Prefer AskUserQuestion over plain text when the tool is available.
 - Do NOT reference "the plan" in your question phrasing because the user has not reviewed it yet.
 
 ### Plan File Structure
@@ -94,7 +96,7 @@ The plan is ready when it clearly covers:
 ### Ending Your Turn
 
 Your turn should normally end in one of two ways:
-- ask a targeted clarifying question, or
+- use AskUserQuestion for a targeted clarifying question when available, or
 - call request_plan_approval
 
 Never ask about approval via plain text. Use request_plan_approval for that boundary.`;
@@ -107,7 +109,7 @@ You are now in a read-only planning phase.
 - Explore with read-only tools only.
 - Keep the canonical plan in: ${planPath}
 - Write a skeleton plan early, then keep rewriting the full plan as you learn more.
-- Ask targeted clarifying questions only when the code cannot answer them.
+- Ask targeted clarifying questions only when the code cannot answer them, and prefer AskUserQuestion when that tool is available.
 - When the plan is ready, call request_plan_approval instead of asking for approval in plain text.`;
 }
 
@@ -124,7 +126,7 @@ export function getKeepPlanningToolResult(
 Continue in plan mode.
 - Re-read the plan file at ${planPath}
 - Refine it with update_plan
-- Resolve the remaining ambiguities before asking for approval again
+- Resolve the remaining ambiguities before asking for approval again, using AskUserQuestion when it is available
 - End with either a targeted clarifying question or request_plan_approval${extra}`;
 }
 
@@ -137,6 +139,7 @@ Canonical plan file: ${planPath}
 
 - Do not summarize the plan again.
 - Do not ask for confirmation again.
+- If TaskCreate / TaskGet / TaskList / TaskUpdate are available, use them to track non-trivial multi-step execution.
 - Start implementing now and make the first concrete tool call or code change.
 - Only pause if a genuinely new blocker appears that the approved plan did not cover.`;
 }
@@ -145,6 +148,7 @@ export function getExecutionHandoffUserMessage(planPath: string): string {
   return `Plan approved. Start implementing now.
 
 Do not restate the plan or ask for confirmation again.
+If TaskCreate / TaskGet / TaskList / TaskUpdate are available, use them to track non-trivial multi-step execution.
 Make your next step a concrete implementation action.
 If you need the exact plan wording, read the canonical plan file at ${planPath}.`;
 }
@@ -167,7 +171,7 @@ export function getFreshSessionImplementationPrompt(
     ? `\n\nIf you need to inspect the earlier planning transcript, the parent session file is: ${previousSessionPath}`
     : "";
 
-  return `Implement the following approved plan:\n\n${plan}\n\nCanonical plan file: ${planPath}\n\nYou are in a fresh implementation session. Treat the plan as already approved and start executing it now. Do not re-open a planning loop unless genuinely new information forces it.${previous}`;
+  return `Implement the following approved plan:\n\n${plan}\n\nCanonical plan file: ${planPath}\n\nYou are in a fresh implementation session. Treat the plan as already approved and start executing it now. If TaskCreate / TaskGet / TaskList / TaskUpdate are available, use them to track non-trivial multi-step execution. Do not re-open a planning loop unless genuinely new information forces it.${previous}`;
 }
 
 export function getEnterPlanModeToolPrompt(): string {
