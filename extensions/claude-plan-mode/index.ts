@@ -18,7 +18,6 @@ import {
   getInitialPlanTemplate,
   getKeepPlanningToolResult,
   getPlanModeContextMessage,
-  getPromptPreview,
   getRequestPlanApprovalToolPrompt,
   getUpdatePlanToolPrompt,
 } from "./prompts.js";
@@ -66,6 +65,7 @@ const STATE_ENTRY = "claude-plan-mode-state";
 const PLAN_CONTEXT_MESSAGE = "claude-plan-mode-context";
 const PLAN_STATUS_WIDGET = "claude-plan-mode-widget";
 const PLAN_STATUS_KEY = "claude-plan-mode-status";
+const INTERNAL_APPLY_FRESH_COMMAND = "__claude-plan-apply-fresh";
 const ASK_USER_TOOL_CANDIDATES = ["AskUserQuestion"] as const;
 // Keep the full planning control surface active outside plan mode so the model
 // can enter planning, update the plan, and request approval within one turn.
@@ -300,7 +300,18 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("claude-plan", {
-    description: "Enter, inspect, or exit Claude-style plan mode",
+    description: "Enter plan mode; use '/claude-plan off' to exit or '/claude-plan show' to inspect the plan",
+    getArgumentCompletions: (prefix: string) => {
+      const items = [
+        { value: "off", label: "off" },
+        { value: "disable", label: "disable" },
+        { value: "exit", label: "exit" },
+        { value: "show", label: "show" },
+        { value: "edit", label: "edit" },
+      ];
+      const filtered = items.filter((item) => item.value.startsWith(prefix));
+      return filtered.length > 0 ? filtered : null;
+    },
     handler: async (args: string, ctx: ExtensionContext) => {
       const trimmed = args.trim();
       const lowered = trimmed.toLowerCase();
@@ -345,19 +356,9 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("claude-plan-prompt", {
-    description: "Preview the Claude-style planning prompt",
-    handler: async (_args: string, ctx: ExtensionContext) => {
-      const planPath = state.planPath ?? (await ensurePlanFile(ctx));
-      await ctx.ui.editor(
-        "Claude-style plan prompt preview",
-        getPromptPreview(getDisplayPath(ctx, planPath)),
-      );
-    },
-  });
-
-  pi.registerCommand("claude-plan-apply-fresh", {
-    description: "Internal: start a fresh implementation session from the approved plan",
+  // Tools cannot call ctx.newSession(), so the fresh-session handoff needs an
+  // internal command trampoline. Pi does not currently support hidden commands.
+  pi.registerCommand(INTERNAL_APPLY_FRESH_COMMAND, {
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       const pending = state.pendingImplementation;
       if (!pending || pending.mode !== "fresh") {
@@ -677,7 +678,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         };
         exitPlanMode(ctx);
         ctx.ui.notify("Plan approved. Fresh implementation session queued.", "info");
-        pi.sendUserMessage("/claude-plan-apply-fresh", { deliverAs: "steer" });
+        pi.sendUserMessage(`/${INTERNAL_APPLY_FRESH_COMMAND}`, { deliverAs: "steer" });
 
         return {
           content: [

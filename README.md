@@ -44,12 +44,10 @@ The approval review flow lives in:
 ## Commands
 
 - `/claude-plan` - enable plan mode
-- `/claude-plan off` - disable it
+- `/claude-plan off` - disable it (`disable` and `exit` also work)
 - `/claude-plan show` - open the current plan file in Pi's editor
 - `/claude-plan edit` - same as `show`, but meant as an editing entrypoint
 - `/claude-plan some task here` - enable plan mode and immediately send that task to the agent
-- `/claude-plan-prompt` - preview the injected planning prompt
-- `/claude-plan-apply-fresh` - internal command used for fresh-session handoff after approval
 
 Shortcut:
 
