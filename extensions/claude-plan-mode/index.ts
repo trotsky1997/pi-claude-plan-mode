@@ -22,7 +22,11 @@ import {
   getRequestPlanApprovalToolPrompt,
   getUpdatePlanToolPrompt,
 } from "./prompts.js";
-import { showPlanApprovalPanel } from "./review-ui.js";
+import {
+  reviewPlanInEditor,
+  showPlanApprovalPanel,
+} from "./review-ui.js";
+import type { PlanApprovalAction } from "./review-ui.js";
 
 type PlanModeState = {
   enabled: boolean;
@@ -529,28 +533,33 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         );
       }
 
-      let action = await showPlanApprovalPanel(ctx, {
+      const displayPlanPath = getDisplayPath(ctx, planPath);
+
+      let reviewed = await reviewPlanInEditor(ctx, {
         plan,
-        planPath: getDisplayPath(ctx, planPath),
+        planPath: displayPlanPath,
         summary: params.summary,
       });
 
-      while (action === "edit-plan") {
-        const reviewed = await ctx.ui.editor(
-          params.summary?.trim()
-            ? `Review plan: ${params.summary.trim()}`
-            : `Review plan: ${getDisplayPath(ctx, planPath)}`,
-          plan,
-        );
+      let action: PlanApprovalAction = "cancel";
 
-        if (typeof reviewed === "string" && reviewed !== plan) {
+      while (typeof reviewed === "string") {
+        if (reviewed !== plan) {
           plan = reviewed;
           await writePlanFile(planPath, plan);
         }
 
         action = await showPlanApprovalPanel(ctx, {
           plan,
-          planPath: getDisplayPath(ctx, planPath),
+          planPath: displayPlanPath,
+          summary: params.summary,
+        });
+
+        if (action !== "edit-plan") break;
+
+        reviewed = await reviewPlanInEditor(ctx, {
+          plan,
+          planPath: displayPlanPath,
           summary: params.summary,
         });
       }

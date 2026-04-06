@@ -8,7 +8,7 @@ A Pi extension package that recreates the core feel of Claude Code's plan mode:
 - approval gate before normal coding tools are restored
 - optional fresh-session implementation handoff
 - plan-file continuity when re-entering planning later
-- custom visual plan review panel with full plan output and approval actions
+- safe plan review flow that opens the full plan in Pi's built-in editor and then asks for the next action
 - prompt text separated into a dedicated file for easy tweaking
 
 ## What it reproduces
@@ -35,7 +35,7 @@ The most important function is:
 
 That is the closest analogue to Claude Code's injected plan-mode instructions.
 
-The visual approval panel lives in:
+The approval review flow lives in:
 
 - `extensions/claude-plan-mode/review-ui.ts`
 
@@ -68,7 +68,7 @@ Suggested flow:
 1. The model calls `enter_plan_mode` for a non-trivial task, or the user starts with `/claude-plan`.
 2. During planning, the model keeps rewriting the full markdown plan with `update_plan`.
 3. When the plan is ready, the model calls `request_plan_approval`.
-4. `request_plan_approval` opens a custom review panel that prints the whole plan and offers explicit actions.
+4. `request_plan_approval` opens the full plan in Pi's built-in editor for review, then asks the user what to do next.
 5. If approved, the user can either keep implementing in the current session or start from a fresh implementation session.
 6. Current-session approval immediately injects a synthetic "start implementing now" user message so the agent resumes execution without waiting for another prompt.
 7. Fresh-session approval turns the approved plan into the first prompt of the new session: `Implement the following approved plan:`
@@ -146,7 +146,7 @@ So this package uses a pragmatic Pi-native design:
 
 - built-in `edit` and `write` are disabled during planning
 - a custom `update_plan` tool is the only write path
-- approval uses a custom plan review panel that prints the whole plan plus keyboard actions
+- approval uses a safer built-in flow: review the plan in Pi's editor, then prompt for the next action
 - fresh-session handoff is emulated with `ctx.newSession()` plus a queued internal slash command
 
 ## Notes for prompt hacking
