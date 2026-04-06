@@ -83,10 +83,32 @@ This keeps the artifact local to the project and avoids touching product source 
 
 When the user approves into a fresh session, that new session inherits the same plan path so later re-entry still points at the same artifact.
 
-## Install locally into a project
+## Install with `pi install`
+
+Use an absolute path when installing the package.
+
+Install into the current project only:
 
 ```bash
 pi install -l /absolute/path/to/pi-claude-plan-mode
+```
+
+Example from this workspace:
+
+```bash
+pi install -l /home/aka/pi-playground/pi-claude-plan-mode
+```
+
+Install globally into Pi so it is available in any project:
+
+```bash
+pi install /absolute/path/to/pi-claude-plan-mode
+```
+
+After installation, start Pi normally and use `/claude-plan`, or start directly in plan mode:
+
+```bash
+pi --claude-plan
 ```
 
 Or run directly for testing:
