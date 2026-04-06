@@ -85,24 +85,30 @@ When the user approves into a fresh session, that new session inherits the same 
 
 ## Install with `pi install`
 
-Use an absolute path when installing the package.
+Recommended: install from GitHub with `git:`.
 
 Install into the current project only:
 
 ```bash
-pi install -l /absolute/path/to/pi-claude-plan-mode
+pi install -l git:github.com/trotsky1997/pi-claude-plan-mode
 ```
 
-Example from this workspace:
+Pin a tag, branch, or commit if you want a fixed revision:
 
 ```bash
-pi install -l /home/aka/pi-playground/pi-claude-plan-mode
+pi install -l git:github.com/trotsky1997/pi-claude-plan-mode@main
 ```
 
 Install globally into Pi so it is available in any project:
 
 ```bash
-pi install /absolute/path/to/pi-claude-plan-mode
+pi install git:github.com/trotsky1997/pi-claude-plan-mode
+```
+
+If you are developing from a local checkout instead, you can still install from disk:
+
+```bash
+pi install -l /absolute/path/to/pi-claude-plan-mode
 ```
 
 After installation, start Pi normally and use `/claude-plan`, or start directly in plan mode:
