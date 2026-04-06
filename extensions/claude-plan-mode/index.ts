@@ -67,10 +67,14 @@ const PLAN_CONTEXT_MESSAGE = "claude-plan-mode-context";
 const PLAN_STATUS_WIDGET = "claude-plan-mode-widget";
 const PLAN_STATUS_KEY = "claude-plan-mode-status";
 const ASK_USER_TOOL_CANDIDATES = ["AskUserQuestion"] as const;
-// Keep enter_plan_mode and update_plan active outside plan mode so the model
-// can enter planning proactively and write the plan in the same turn.
-const PLAN_TRANSITION_TOOLS = ["enter_plan_mode", "update_plan"] as const;
-const PLAN_ONLY_TOOLS = ["request_plan_approval"] as const;
+// Keep the full planning control surface active outside plan mode so the model
+// can enter planning, update the plan, and request approval within one turn.
+const PLAN_TRANSITION_TOOLS = [
+  "enter_plan_mode",
+  "update_plan",
+  "request_plan_approval",
+] as const;
+const PLAN_ONLY_TOOLS = [] as const;
 const READ_ONLY_TOOL_CANDIDATES = ["read", "bash", "grep", "find", "ls"] as const;
 const DEFAULT_EXECUTION_TOOLS = ["read", "bash", "edit", "write"] as const;
 const PLAN_DIR = [".pi", "claude-plan-mode", "plans"] as const;
