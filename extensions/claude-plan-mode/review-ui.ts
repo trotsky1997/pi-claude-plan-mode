@@ -61,7 +61,6 @@ export async function showPlanApprovalPanel(
   return ctx.ui.custom<PlanApprovalAction>((tui, theme, _kb, done) => {
     const markdown = new Markdown(options.plan, 0, 0, getMarkdownTheme());
     let actionIndex = 0;
-    let scrollOffset = 0;
     let cachedWidth: number | undefined;
     let cachedLines: string[] | undefined;
     let cachedPlanLines: string[] | undefined;
@@ -83,17 +82,6 @@ export async function showPlanApprovalPanel(
       return cachedPlanLines;
     }
 
-    function getViewportHeight(): number {
-      return Math.max(8, Math.min(22, tui.terminal.rows - 16));
-    }
-
-    function clampScroll(planLines: string[]): void {
-      const viewportHeight = getViewportHeight();
-      const maxOffset = Math.max(0, planLines.length - viewportHeight);
-      if (scrollOffset > maxOffset) scrollOffset = maxOffset;
-      if (scrollOffset < 0) scrollOffset = 0;
-    }
-
     function complete(action: PlanApprovalAction): void {
       done(action);
     }
@@ -110,36 +98,6 @@ export async function showPlanApprovalPanel(
       }
       if (matchesKey(data, Key.shift("tab")) || matchesKey(data, Key.left)) {
         actionIndex = (actionIndex - 1 + ACTIONS.length) % ACTIONS.length;
-        invalidate();
-        return;
-      }
-      if (matchesKey(data, Key.up)) {
-        scrollOffset -= 1;
-        invalidate();
-        return;
-      }
-      if (matchesKey(data, Key.down)) {
-        scrollOffset += 1;
-        invalidate();
-        return;
-      }
-      if (matchesKey(data, Key.pageUp)) {
-        scrollOffset -= getViewportHeight();
-        invalidate();
-        return;
-      }
-      if (matchesKey(data, Key.pageDown)) {
-        scrollOffset += getViewportHeight();
-        invalidate();
-        return;
-      }
-      if (matchesKey(data, Key.home)) {
-        scrollOffset = 0;
-        invalidate();
-        return;
-      }
-      if (matchesKey(data, Key.end)) {
-        scrollOffset = Number.MAX_SAFE_INTEGER;
         invalidate();
         return;
       }
@@ -160,17 +118,7 @@ export async function showPlanApprovalPanel(
 
         const lines: string[] = [];
         const planWidth = Math.max(24, width - 2);
-        const viewportHeight = getViewportHeight();
         const planLines = getPlanLines(planWidth);
-        clampScroll(planLines);
-        const visiblePlanLines = planLines.slice(
-          scrollOffset,
-          scrollOffset + viewportHeight,
-        );
-        const fromLine = planLines.length === 0 ? 0 : scrollOffset + 1;
-        const toLine = planLines.length === 0
-          ? 0
-          : Math.min(planLines.length, scrollOffset + viewportHeight);
         const divider = theme.fg("accent", "─".repeat(Math.max(8, width)));
 
         const add = (line: string = "") => {
@@ -183,14 +131,11 @@ export async function showPlanApprovalPanel(
         if (options.summary?.trim()) {
           add(theme.fg("dim", ` Summary: ${options.summary.trim()}`));
         }
-        add(theme.fg("dim", ` Plan preview lines ${fromLine}-${toLine} of ${planLines.length}`));
+        add(theme.fg("dim", ` Full plan output (${planLines.length} lines). Use terminal scrollback if needed.`));
         add(divider);
 
-        for (const line of visiblePlanLines) {
+        for (const line of planLines) {
           add(` ${line}`);
-        }
-        for (let i = visiblePlanLines.length; i < viewportHeight; i++) {
-          add("");
         }
 
         add(divider);
@@ -210,7 +155,7 @@ export async function showPlanApprovalPanel(
         add(
           theme.fg(
             "dim",
-            " Up/Down/PageUp/PageDown scroll plan • Tab/Shift+Tab switch action • Enter choose • Esc cancel",
+            " Tab/Shift+Tab or Left/Right switch action • Enter choose • Esc cancel • Hotkeys: i / f / e / p",
           ),
         );
         add(divider);

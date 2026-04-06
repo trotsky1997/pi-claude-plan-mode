@@ -12,6 +12,7 @@ import {
   getApprovedPlanToolResult,
   getEnterPlanModeToolPrompt,
   getEnterPlanModeToolResult,
+  getExecutionHandoffUserMessage,
   getFreshSessionImplementationPrompt,
   getFreshSessionQueuedToolResult,
   getInitialPlanTemplate,
@@ -603,12 +604,15 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
       state.pendingImplementation = undefined;
       exitPlanMode(ctx);
       ctx.ui.notify("Plan approved. Normal tools are active again.", "info");
+      pi.sendUserMessage(getExecutionHandoffUserMessage(planPath), {
+        deliverAs: "steer",
+      });
 
       return {
         content: [
           {
             type: "text",
-            text: getApprovedPlanToolResult(planPath, plan),
+            text: getApprovedPlanToolResult(planPath),
           },
         ],
         details: {
@@ -654,8 +658,10 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
     return {
       messages: event.messages.filter((message: any, index: number) => {
         const customType = (message as { customType?: string }).customType;
-        if (customType !== PLAN_CONTEXT_MESSAGE) return true;
-        return state.enabled && index === lastPlanContextIndex;
+        if (customType === PLAN_CONTEXT_MESSAGE) {
+          return state.enabled && index === lastPlanContextIndex;
+        }
+        return true;
       }),
     };
   });

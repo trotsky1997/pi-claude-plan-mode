@@ -130,16 +130,23 @@ Continue in plan mode.
 
 export function getApprovedPlanToolResult(
   planPath: string,
-  plan: string,
 ): string {
-  return `The user approved the plan. Plan mode is now OFF and you may start implementing immediately.
+  return `The user approved the plan. Plan mode is now OFF and normal tools are active again.
 
-Approved plan file: ${planPath}
+Canonical plan file: ${planPath}
 
-Approved plan:
-${plan}
+- Do not summarize the plan again.
+- Do not ask for confirmation again.
+- Start implementing now and make the first concrete tool call or code change.
+- Only pause if a genuinely new blocker appears that the approved plan did not cover.`;
+}
 
-Switch from planning to execution now. Use normal tools again, update code carefully, and follow the approved plan unless new facts force a small correction. Start implementing instead of continuing to debate the approach.`;
+export function getExecutionHandoffUserMessage(planPath: string): string {
+  return `Plan approved. Start implementing now.
+
+Do not restate the plan or ask for confirmation again.
+Make your next step a concrete implementation action.
+If you need the exact plan wording, read the canonical plan file at ${planPath}.`;
 }
 
 export function getFreshSessionQueuedToolResult(planPath: string): string {
