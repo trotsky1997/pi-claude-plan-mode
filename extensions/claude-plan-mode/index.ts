@@ -121,57 +121,6 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
     default: false,
   });
 
-  pi.registerCommand("claude-plan-apply-fresh", {
-    description: "Apply the approved plan in a fresh session",
-    handler: async (_args: string, ctx: ExtensionCommandContext) => {
-      const pending = manager.getPendingImplementation();
-      if (!pending || pending.mode !== "fresh") {
-        ctx.ui.notify("No queued fresh implementation session.", "warning");
-        return;
-      }
-
-      const previousSessionFile =
-        pending.previousSessionFile ?? ctx.sessionManager.getSessionFile();
-      const executionTools = getExecutionTools();
-      const prompt = getFreshSessionImplementationPrompt(
-        pending.planPath,
-        previousSessionFile,
-      );
-      const inheritedState: PlanModeState = {
-        enabled: false,
-        planPath: pending.planPath,
-        previousActiveTools: executionTools,
-        lastReason: manager.getLastReason(),
-        hasExited: true,
-        justReentered: false,
-      };
-
-      const previousState = manager.getSnapshot();
-
-      manager.markApprovedAndExited();
-      persistState();
-
-      const newSessionResult = await ctx.newSession({
-        parentSession: previousSessionFile,
-        setup: async (sessionManager: any) => {
-          sessionManager.appendCustomEntry(STATE_ENTRY, inheritedState);
-        },
-      });
-
-      if (newSessionResult.cancelled) {
-        manager.restoreSnapshot(previousState);
-        persistState();
-        applyToolState();
-        updateUi(ctx);
-        ctx.ui.notify("Fresh implementation session cancelled. Approved handoff is still queued.", "info");
-        return;
-      }
-
-      pi.sendUserMessage(prompt);
-      ctx.ui.notify("Fresh implementation session created.", "info");
-    },
-  });
-
   pi.registerShortcut("ctrl+alt+p", {
     description: "Toggle Claude-style plan mode",
     handler: async (ctx: ExtensionContext) => {
@@ -194,11 +143,12 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         { value: "exit", label: "exit" },
         { value: "show", label: "show" },
         { value: "edit", label: "edit" },
+        { value: "apply-fresh", label: "apply-fresh" },
       ];
       const filtered = items.filter((item) => item.value.startsWith(prefix));
       return filtered.length > 0 ? filtered : null;
     },
-    handler: async (args: string, ctx: ExtensionContext) => {
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
       const trimmed = args.trim();
       const lowered = trimmed.toLowerCase();
 
@@ -223,6 +173,59 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         if (!state.enabled) {
           ctx.ui.notify("Plan mode is currently off.", "info");
         }
+        return;
+      }
+
+      if (lowered === "apply-fresh") {
+        const pending = manager.getPendingImplementation();
+        if (!pending || pending.mode !== "fresh") {
+          ctx.ui.notify("No queued fresh implementation session.", "warning");
+          return;
+        }
+
+        const previousSessionFile =
+          pending.previousSessionFile ?? ctx.sessionManager.getSessionFile();
+        const executionTools = getExecutionTools();
+        const prompt = getFreshSessionImplementationPrompt(
+          pending.planPath,
+          previousSessionFile,
+        );
+        const inheritedState: PlanModeState = {
+          enabled: false,
+          planPath: pending.planPath,
+          previousActiveTools: executionTools,
+          lastReason: manager.getLastReason(),
+          hasExited: true,
+          justReentered: false,
+        };
+
+        const previousState = manager.getSnapshot();
+
+        manager.markApprovedAndExited();
+        persistState();
+
+        const newSessionResult = await ctx.newSession({
+          parentSession: previousSessionFile,
+          setup: async (sessionManager: any) => {
+            sessionManager.appendCustomEntry(STATE_ENTRY, inheritedState);
+            sessionManager.appendMessage({
+              role: "user",
+              content: [{ type: "text", text: prompt }],
+              timestamp: Date.now(),
+            });
+          },
+        });
+
+        if (newSessionResult.cancelled) {
+          manager.restoreSnapshot(previousState);
+          persistState();
+          applyToolState();
+          updateUi(ctx);
+          ctx.ui.notify("Fresh implementation session cancelled. Approved handoff is still queued.", "info");
+          return;
+        }
+
+        ctx.ui.notify("Fresh implementation session created.", "info");
         return;
       }
 
@@ -495,8 +498,8 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
           previousSessionFile: ctx.sessionManager.getSessionFile(),
         });
         exitPlanMode(ctx);
-        ctx.ui.notify("Plan approved. Fresh implementation session queued.", "info");
-        pi.sendUserMessage("/claude-plan-apply-fresh", { deliverAs: "steer" });
+        ctx.ui.setEditorText("/claude-plan apply-fresh");
+        ctx.ui.notify("Plan approved. Run '/claude-plan apply-fresh' to open the new implementation session.", "info");
 
         return {
           content: [

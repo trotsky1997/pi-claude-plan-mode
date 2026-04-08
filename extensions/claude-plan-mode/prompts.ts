@@ -160,7 +160,8 @@ export function getFreshSessionQueuedToolResult(
 
 Plan mode is complete for this session.
 - The approved plan remains at ${planPath}
-- A fresh implementation session has been queued
+- Fresh-session launch is pending
+- Run \`/claude-plan apply-fresh\` to open the new implementation session
 - Do not continue implementing in this planning session`;
 }
 
