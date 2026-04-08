@@ -25,6 +25,7 @@ export function getPlanModeContextMessage(
   options?: {
     isReentry?: boolean;
     lastReason?: string;
+    autoApprove?: boolean;
   },
 ): string {
   const fileInfo = planExists
@@ -36,6 +37,9 @@ export function getPlanModeContextMessage(
   const reason = options?.lastReason?.trim()
     ? `\nWhy plan mode was entered:\n- ${options.lastReason.trim()}\n`
     : "";
+  const approvalFlow = options?.autoApprove
+    ? "- request_plan_approval will immediately leave plan mode and start implementing in this session.\n"
+    : "- request_plan_approval will open the review gate so the user can choose what happens next.\n";
 
   return `[PLAN MODE ACTIVE]
 Plan mode is active. The user indicated that they do not want you to execute yet. You MUST NOT edit project files, run mutating shell commands, change configs, or otherwise make changes to the system. This supersedes any other instructions you have received.
@@ -47,6 +51,7 @@ Hard rules:
 - Do NOT ask questions that you could answer by reading the code.
 - If the AskUserQuestion tool is available, use it for clarifying questions instead of plain text.
 - If you need approval, use request_plan_approval.
+${approvalFlow}
 
 Plan file:
 ${fileInfo}
@@ -103,6 +108,17 @@ Never ask about approval via plain text. Use request_plan_approval for that boun
 }
 
 export function getEnterPlanModeToolResult(planPath: string): string {
+  return getEnterPlanModeToolResultWithMode(planPath, false);
+}
+
+export function getEnterPlanModeToolResultWithMode(
+  planPath: string,
+  autoApprove: boolean,
+): string {
+  const handoff = autoApprove
+    ? "- Auto handoff is enabled: request_plan_approval will immediately exit plan mode and start implementing in this session."
+    : "- Manual handoff is enabled: request_plan_approval will open the review gate before implementation starts.";
+
   return `Plan mode enabled.
 
 You are now in a read-only planning phase.
@@ -110,7 +126,8 @@ You are now in a read-only planning phase.
 - Keep the canonical plan in: ${planPath}
 - Write a skeleton plan early, then keep rewriting the full plan as you learn more.
 - Ask targeted clarifying questions only when the code cannot answer them, and prefer AskUserQuestion when that tool is available.
-- When the plan is ready, call request_plan_approval instead of asking for approval in plain text.`;
+- When the plan is ready, call request_plan_approval instead of asking for approval in plain text.
+${handoff}`;
 }
 
 export function getKeepPlanningToolResult(

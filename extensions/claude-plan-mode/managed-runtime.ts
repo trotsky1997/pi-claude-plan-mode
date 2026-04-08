@@ -320,6 +320,7 @@ export function createManagedPlanModeExtensionFactory(options: ManagedPlanModeOp
               content: `${getKeepPlanningToolResult(planPath, response.feedback)}\n\n${getPlanModeContextMessage(planPath, true, {
                 isReentry: false,
                 lastReason: manager.getLastReason(),
+                autoApprove: manager.isAutoApproveEnabled(),
               })}`,
               display: false,
             },
@@ -343,6 +344,7 @@ export function createManagedPlanModeExtensionFactory(options: ManagedPlanModeOp
           content: getPlanModeContextMessage(planPath, planExists, {
             isReentry,
             lastReason: manager.getLastReason(),
+            autoApprove: manager.isAutoApproveEnabled(),
           }),
           display: false,
         },

@@ -3,11 +3,15 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
+import { withFileMutationQueue } from "@mariozechner/pi-coding-agent";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import {
   getApprovedPlanToolResult,
   getEnterPlanModeToolPrompt,
-  getEnterPlanModeToolResult,
+  getEnterPlanModeToolResultWithMode,
   getExecutionHandoffUserMessage,
   getFreshSessionImplementationPrompt,
   getFreshSessionQueuedToolResult,
@@ -19,6 +23,7 @@ import {
 } from "./prompts.js";
 import {
   reviewPlanInEditor,
+  showEnterPlanModePanel,
   showPlanApprovalPanel,
 } from "./review-ui.js";
 import type { PlanApprovalAction } from "./review-ui.js";
@@ -73,8 +78,67 @@ const DEFAULT_EXECUTION_TOOLS = [
   "TaskUpdate",
 ] as const;
 const PLAN_DIR = [".pi", "claude-plan-mode", "plans"] as const;
+const GLOBAL_SETTINGS_PATH = join(homedir(), ".pi", "settings.json");
+const GLOBAL_SETTINGS_KEY = ["claudePlanMode", "autoApprove"] as const;
+
+async function readGlobalSettings(): Promise<Record<string, unknown>> {
+  try {
+    const raw = await readFile(GLOBAL_SETTINGS_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function getNestedBoolean(
+  object: Record<string, unknown>,
+  path: readonly string[],
+): boolean {
+  let current: unknown = object;
+  for (const segment of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) return false;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current === true;
+}
+
+function setNestedValue(
+  object: Record<string, unknown>,
+  path: readonly string[],
+  value: unknown,
+): void {
+  let current: Record<string, unknown> = object;
+  for (const segment of path.slice(0, -1)) {
+    const next = current[segment];
+    if (!next || typeof next !== "object" || Array.isArray(next)) {
+      current[segment] = {};
+    }
+    current = current[segment] as Record<string, unknown>;
+  }
+  current[path[path.length - 1] as string] = value;
+}
+
+async function isGlobalAutoApproveEnabled(): Promise<boolean> {
+  const settings = await readGlobalSettings();
+  return getNestedBoolean(settings, GLOBAL_SETTINGS_KEY);
+}
+
+async function setGlobalAutoApproveEnabled(enabled: boolean): Promise<void> {
+  const settings = await readGlobalSettings();
+  setNestedValue(settings, GLOBAL_SETTINGS_KEY, enabled);
+  await mkdir(dirname(GLOBAL_SETTINGS_PATH), { recursive: true });
+  await withFileMutationQueue(GLOBAL_SETTINGS_PATH, async () => {
+    await writeFile(GLOBAL_SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  });
+}
 
 export default function claudePlanMode(pi: ExtensionAPI): void {
+  const runtimePi = pi as ExtensionAPI & {
+    on(event: string, handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void): void;
+  };
   const manager = new PlanModeManager(pi, {
     stateEntry: STATE_ENTRY,
     widgetKey: PLAN_STATUS_WIDGET,
@@ -106,7 +170,8 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
   const enterPlanMode = async (
     ctx: ExtensionContext,
     reason?: string,
-  ): Promise<string> => manager.enterPlanMode(ctx, reason);
+    options?: { autoApprove?: boolean },
+  ): Promise<string> => manager.enterPlanMode(ctx, reason, options);
   const exitPlanMode = (ctx: ExtensionContext): void => manager.exitPlanMode(ctx);
   const restoreFromBranch = async (ctx: ExtensionContext): Promise<void> =>
     manager.restoreFromBranch(ctx);
@@ -114,6 +179,15 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
     ctx: ExtensionContext,
     options?: { allowFlagBootstrap?: boolean },
   ): Promise<void> => manager.restoreFromBranch(ctx, options);
+  const syncAutoApproveFromSettings = async (ctx?: ExtensionContext): Promise<boolean> => {
+    const autoApprove = await isGlobalAutoApproveEnabled();
+    if (state.autoApprove !== autoApprove) {
+      manager.setAutoApprove(autoApprove);
+      persistState();
+      if (ctx) updateUi(ctx);
+    }
+    return autoApprove;
+  };
 
   pi.registerFlag("claude-plan", {
     description: "Start Pi in Claude-style planning mode",
@@ -138,6 +212,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
     description: "Enter plan mode; use '/claude-plan off' to exit or '/claude-plan show' to inspect the plan",
     getArgumentCompletions: (prefix: string) => {
       const items = [
+        { value: "auto", label: "auto" },
         { value: "off", label: "off" },
         { value: "disable", label: "disable" },
         { value: "exit", label: "exit" },
@@ -176,6 +251,21 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         return;
       }
 
+      if (lowered === "auto") {
+        const nextValue = !(await isGlobalAutoApproveEnabled());
+        await setGlobalAutoApproveEnabled(nextValue);
+        manager.setAutoApprove(nextValue);
+        persistState();
+        updateUi(ctx);
+        ctx.ui.notify(
+          nextValue
+            ? "Claude plan auto mode enabled globally. Future enter/exit approvals are skipped."
+            : "Claude plan auto mode disabled globally. Manual plan approvals are back.",
+          "info",
+        );
+        return;
+      }
+
       if (lowered === "apply-fresh") {
         const pending = manager.getPendingImplementation();
         if (!pending || pending.mode !== "fresh") {
@@ -192,6 +282,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         );
         const inheritedState: PlanModeState = {
           enabled: false,
+          autoApprove: false,
           planPath: pending.planPath,
           previousActiveTools: executionTools,
           lastReason: manager.getLastReason(),
@@ -226,7 +317,9 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
       }
 
       if (!state.enabled) {
-        const planPath = await enterPlanMode(ctx, trimmed || undefined);
+        const planPath = await enterPlanMode(ctx, trimmed || undefined, {
+          autoApprove: await syncAutoApproveFromSettings(ctx),
+        });
         ctx.ui.notify(`Plan mode enabled: ${getDisplayPath(ctx, planPath)}`, "info");
       }
 
@@ -263,10 +356,21 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
       ctx: ExtensionContext,
     ) {
       if (state.enabled) {
+        await syncAutoApproveFromSettings(ctx);
         const planPath = state.planPath ?? (await ensurePlanFile(ctx));
         return {
-          content: [{ type: "text", text: getEnterPlanModeToolResult(planPath) }],
-          details: { entered: true, alreadyEnabled: true, planPath },
+          content: [{ type: "text", text: getEnterPlanModeToolResultWithMode(planPath, manager.isAutoApproveEnabled()) }],
+          details: { entered: true, alreadyEnabled: true, autoApprove: manager.isAutoApproveEnabled(), planPath } as any,
+        };
+      }
+
+      const globalAutoApprove = await syncAutoApproveFromSettings(ctx);
+
+      if (globalAutoApprove) {
+        const planPath = await enterPlanMode(ctx, params.reason, { autoApprove: true });
+        return {
+          content: [{ type: "text", text: getEnterPlanModeToolResultWithMode(planPath, true) }],
+          details: { entered: true, alreadyEnabled: false, autoApprove: true, planPath } as any,
         };
       }
 
@@ -276,12 +380,9 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         );
       }
 
-      const approved = await ctx.ui.confirm(
-        "Enter plan mode?",
-        `${params.reason}\n\nPi will switch to read-only planning tools until the plan is approved.`,
-      );
+      const enterAction = await showEnterPlanModePanel(ctx, params.reason);
 
-      if (!approved) {
+      if (enterAction === "cancel") {
         return {
           content: [
             {
@@ -289,14 +390,26 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
               text: "The user declined plan mode. Continue without it, or ask a direct clarifying question if needed.",
             },
           ],
-          details: { entered: false },
+          details: {
+            entered: false,
+            alreadyEnabled: false,
+            autoApprove: false,
+            planPath: state.planPath ?? "",
+          } as any,
         };
       }
 
-      const planPath = await enterPlanMode(ctx, params.reason);
+      const autoApprove = enterAction === "enable-auto-and-enter";
+      if (autoApprove) {
+        await setGlobalAutoApproveEnabled(true);
+        manager.setAutoApprove(true);
+        persistState();
+        updateUi(ctx);
+      }
+      const planPath = await enterPlanMode(ctx, params.reason, { autoApprove });
       return {
-        content: [{ type: "text", text: getEnterPlanModeToolResult(planPath) }],
-        details: { entered: true, planPath },
+        content: [{ type: "text", text: getEnterPlanModeToolResultWithMode(planPath, autoApprove) }],
+        details: { entered: true, alreadyEnabled: false, autoApprove, planPath } as any,
       };
     },
   });
@@ -385,18 +498,42 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
           "request_plan_approval can only be used while plan mode is active.",
         );
       }
-      if (!ctx.hasUI) {
-        throw new Error(
-          "request_plan_approval requires an interactive Pi session because the user must review the plan.",
-        );
-      }
-
       const planPath = state.planPath ?? (await ensurePlanFile(ctx));
       manager.setPlanPath(planPath);
+      await syncAutoApproveFromSettings(ctx);
       let plan = await readPlanFile(planPath);
       if (!plan.trim()) {
         throw new Error(
           "The plan file is empty. Use update_plan first, then call request_plan_approval.",
+        );
+      }
+
+      if (manager.isAutoApproveEnabled()) {
+        manager.setPendingImplementation(undefined);
+        exitPlanMode(ctx);
+        ctx.ui.notify("Plan approved automatically. Normal tools are active again.", "info");
+        pi.sendUserMessage(getExecutionHandoffUserMessage(planPath), {
+          deliverAs: "steer",
+        });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: getApprovedPlanToolResult(planPath),
+            },
+          ],
+          details: {
+            approved: true,
+            autoApproved: true,
+            planPath,
+          },
+        };
+      }
+
+      if (!ctx.hasUI) {
+        throw new Error(
+          "request_plan_approval requires an interactive Pi session because the user must review the plan.",
         );
       }
 
@@ -422,9 +559,10 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
               ],
               details: {
                 approved: false,
+                autoApproved: false,
                 planPath,
                 reason: "empty-plan",
-              },
+              } as any,
             };
           }
           plan = reviewed;
@@ -460,9 +598,10 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
           ],
           details: {
             approved: false,
+            autoApproved: false,
             cancelled: true,
             planPath,
-          },
+          } as any,
         };
       }
 
@@ -480,9 +619,10 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
           ],
           details: {
             approved: false,
+            autoApproved: false,
             planPath,
             feedback: feedback ?? "",
-          },
+          } as any,
         };
       }
 
@@ -506,9 +646,10 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
           ],
           details: {
             approved: true,
+            autoApproved: false,
             mode: "fresh",
             planPath,
-          },
+          } as any,
         };
       }
 
@@ -528,8 +669,9 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         ],
         details: {
           approved: true,
+          autoApproved: false,
           planPath,
-        },
+        } as any,
       };
     },
   });
@@ -594,6 +736,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         content: getPlanModeContextMessage(planPath, planExists, {
           isReentry,
           lastReason: manager.getLastReason(),
+          autoApprove: manager.isAutoApproveEnabled(),
         }),
         display: false,
       },
@@ -604,6 +747,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
     await restoreFromBranchWithOptions(ctx, {
       allowFlagBootstrap: event?.reason === "startup",
     });
+    await syncAutoApproveFromSettings(ctx);
 
     if (event?.reason === "new" && state.queuedStartupPrompt) {
       const prompt = state.queuedStartupPrompt;
@@ -613,11 +757,11 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("session_switch", async (_event: unknown, ctx: ExtensionContext) => {
+  runtimePi.on("session_switch", async (_event: unknown, ctx: ExtensionContext) => {
     await restoreFromBranch(ctx);
   });
 
-  pi.on("session_fork", async (_event: unknown, ctx: ExtensionContext) => {
+  runtimePi.on("session_fork", async (_event: unknown, ctx: ExtensionContext) => {
     await restoreFromBranch(ctx);
   });
 

@@ -49,12 +49,20 @@ export class PlanModeManager {
     return this.state.enabled;
   }
 
+  isAutoApproveEnabled(): boolean {
+    return Boolean(this.state.autoApprove);
+  }
+
   getPlanPath(): string | undefined {
     return this.state.planPath;
   }
 
   setPlanPath(planPath: string | undefined): void {
     this.state.planPath = planPath;
+  }
+
+  setAutoApprove(autoApprove: boolean): void {
+    this.state.autoApprove = autoApprove;
   }
 
   getLastReason(): string | undefined {
@@ -96,6 +104,7 @@ export class PlanModeManager {
     this.state.pendingApprovalRequest = undefined;
     this.state.queuedStartupPrompt = undefined;
     this.state.enabled = false;
+    this.state.autoApprove = false;
     this.state.hasExited = true;
     this.state.justReentered = false;
   }
@@ -169,6 +178,9 @@ export class PlanModeManager {
     ctx.ui.setWidget(this.options.widgetKey, [
       "Claude-style plan mode is active.",
       `Plan file: ${this.getDisplayPath(ctx, this.state.planPath)}`,
+      this.state.autoApprove
+        ? "Auto handoff is enabled: request_plan_approval exits plan mode and starts implementing here without another approval gate."
+        : "Manual approval is enabled: request_plan_approval opens the review gate before execution resumes.",
       "Read-only tools plus planning/question tools are enabled, including research tools when available.",
     ]);
   }
@@ -212,6 +224,7 @@ export class PlanModeManager {
   async enterPlanMode(
     ctx: ExtensionContext,
     reason?: string,
+    options?: { autoApprove?: boolean },
   ): Promise<string> {
     const planPath = await this.ensurePlanFile(ctx, this.state.planPath);
     if (!this.state.enabled) {
@@ -221,6 +234,7 @@ export class PlanModeManager {
     }
     const reentering = !!this.state.hasExited && existsSync(planPath);
     this.state.enabled = true;
+    this.state.autoApprove = options?.autoApprove ?? false;
     this.state.planPath = planPath;
     this.state.lastReason = reason?.trim() || this.state.lastReason;
     this.state.justReentered = reentering;
@@ -233,6 +247,7 @@ export class PlanModeManager {
 
   exitPlanMode(ctx: ExtensionContext): void {
     this.state.enabled = false;
+    this.state.autoApprove = false;
     this.state.hasExited = true;
     this.state.justReentered = false;
     this.persistState();

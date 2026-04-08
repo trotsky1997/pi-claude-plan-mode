@@ -41,6 +41,7 @@ export const PendingApprovalRequestSchema = z.object({
 
 export const PlanModeStateSchema = z.object({
   enabled: z.boolean().default(false),
+  autoApprove: z.boolean().default(false),
   planPath: OptionalStringSchema,
   previousActiveTools: OptionalStringListSchema,
   lastReason: OptionalStringSchema,
@@ -58,6 +59,7 @@ export type PlanModeState = z.infer<typeof PlanModeStateSchema>;
 export function createEmptyPlanModeState(): PlanModeState {
   return {
     enabled: false,
+    autoApprove: false,
     hasExited: false,
     justReentered: false,
   };
@@ -72,6 +74,7 @@ export function sanitizePlanModeState(value: unknown): PlanModeState {
 export function clonePlanModeState(state: PlanModeState): PlanModeState {
   return {
     enabled: state.enabled,
+    autoApprove: state.autoApprove,
     planPath: state.planPath,
     previousActiveTools: state.previousActiveTools ? [...state.previousActiveTools] : undefined,
     lastReason: state.lastReason,

@@ -7,6 +7,8 @@ export type PlanApprovalAction =
   | "keep-planning"
   | "cancel";
 
+export type EnterPlanModeAction = "enter" | "enable-auto-and-enter" | "cancel";
+
 type ActionConfig = {
   id: Exclude<PlanApprovalAction, "cancel">;
   label: string;
@@ -35,6 +37,19 @@ const ACTIONS: ActionConfig[] = [
     description: "Reject execution for now and continue refining the plan.",
   },
 ];
+
+const ENTER_ACTIONS = [
+  {
+    id: "enter",
+    label: "Enter plan mode",
+    description: "Switch to read-only planning tools and keep the review gate for implementation.",
+  },
+  {
+    id: "enable-auto-and-enter",
+    label: "Enable auto mode and enter",
+    description: "Save auto plan mode in global settings, then enter plan mode without future enter/exit approvals.",
+  },
+] as const;
 
 function getReviewTitle(options: {
   plan: string;
@@ -77,6 +92,26 @@ export async function showPlanApprovalPanel(
   if (!choice) return "cancel";
 
   const selected = ACTIONS.find(
+    (action) => `${action.label} - ${action.description}` === choice,
+  );
+
+  return selected?.id ?? "cancel";
+}
+
+export async function showEnterPlanModePanel(
+  ctx: ExtensionContext,
+  reason: string,
+): Promise<EnterPlanModeAction> {
+  if (!ctx.hasUI) return "cancel";
+
+  const choice = await ctx.ui.select(
+    `Enter plan mode? ${reason.trim()}`,
+    ENTER_ACTIONS.map((action) => `${action.label} - ${action.description}`),
+  );
+
+  if (!choice) return "cancel";
+
+  const selected = ENTER_ACTIONS.find(
     (action) => `${action.label} - ${action.description}` === choice,
   );
 

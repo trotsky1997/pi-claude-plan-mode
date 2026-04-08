@@ -44,6 +44,7 @@ The approval review flow lives in:
 ## Commands
 
 - `/claude-plan` - enable plan mode
+- `/claude-plan auto` - toggle global auto plan mode in `~/.pi/settings.json`; when enabled, entering and exiting plan mode no longer asks for approval and approved plans implement in the current session by default
 - `/claude-plan off` - disable it (`disable` and `exit` also work)
 - `/claude-plan show` - open the current plan file in Pi's editor
 - `/claude-plan edit` - same as `show`, but meant as an editing entrypoint
@@ -73,7 +74,7 @@ Suggested flow:
 1. The model calls `enter_plan_mode` for a non-trivial task, or the user starts with `/claude-plan`.
 2. During planning, the model keeps rewriting the full markdown plan with `update_plan`.
 3. When the plan is ready, the model calls `request_plan_approval`.
-4. `request_plan_approval` opens the full plan in Pi's built-in editor for review, then asks the user what to do next.
+4. `request_plan_approval` opens the full plan in Pi's built-in editor for review, then asks the user what to do next. If global auto plan mode is enabled, it skips that review gate and immediately resumes implementation in the current session.
 5. If approved, the user can either keep implementing in the current session or start from a fresh implementation session.
 6. Current-session approval immediately injects a synthetic "start implementing now" user message so the agent resumes execution without waiting for another prompt, and that handoff now nudges the model to prefer `TodoWrite` for multi-step execution tracking.
 7. Fresh-session approval stages the handoff and prefills `/claude-plan apply-fresh` in the editor. When the user submits that command, the extension opens a new session automatically, carries the generated implementation prompt through session state, and triggers it from the new session startup hook.
@@ -153,7 +154,7 @@ So this package uses a pragmatic Pi-native design:
 - built-in `edit` and `write` are disabled during planning
 - a custom `update_plan` tool is the only write path
 - if available, `AskUserQuestion` is the preferred clarifying-question path during planning
-- approval uses a safer built-in flow: review the plan in Pi's editor, then prompt for the next action
+- approval uses a safer built-in flow: review the plan in Pi's editor, then prompt for the next action; global auto plan mode can skip that gate and resume implementation in place
 - fresh-session handoff is split across the tool/UI boundary: approval stages the handoff, then `/claude-plan apply-fresh` creates the new session with `ctx.newSession()`, carries the implementation prompt in extension state, and triggers it from the new session startup hook
 
 ## Recommended pairing
