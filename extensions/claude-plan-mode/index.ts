@@ -197,6 +197,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
           lastReason: manager.getLastReason(),
           hasExited: true,
           justReentered: false,
+          queuedStartupPrompt: prompt,
         };
 
         const previousState = manager.getSnapshot();
@@ -208,11 +209,6 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
           parentSession: previousSessionFile,
           setup: async (sessionManager: any) => {
             sessionManager.appendCustomEntry(STATE_ENTRY, inheritedState);
-            sessionManager.appendMessage({
-              role: "user",
-              content: [{ type: "text", text: prompt }],
-              timestamp: Date.now(),
-            });
           },
         });
 
@@ -608,6 +604,13 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
     await restoreFromBranchWithOptions(ctx, {
       allowFlagBootstrap: event?.reason === "startup",
     });
+
+    if (event?.reason === "new" && state.queuedStartupPrompt) {
+      const prompt = state.queuedStartupPrompt;
+      state.queuedStartupPrompt = undefined;
+      persistState();
+      pi.sendUserMessage(prompt);
+    }
   });
 
   pi.on("session_switch", async (_event: unknown, ctx: ExtensionContext) => {

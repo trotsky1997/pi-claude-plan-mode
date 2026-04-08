@@ -46,6 +46,7 @@ export const PlanModeStateSchema = z.object({
   lastReason: OptionalStringSchema,
   hasExited: z.boolean().default(false),
   justReentered: z.boolean().default(false),
+  queuedStartupPrompt: OptionalStringSchema,
   pendingImplementation: PendingImplementationSchema.optional(),
   pendingApprovalRequest: PendingApprovalRequestSchema.optional(),
 });
@@ -76,6 +77,7 @@ export function clonePlanModeState(state: PlanModeState): PlanModeState {
     lastReason: state.lastReason,
     hasExited: state.hasExited,
     justReentered: state.justReentered,
+    queuedStartupPrompt: state.queuedStartupPrompt,
     pendingImplementation: state.pendingImplementation
       ? { ...state.pendingImplementation }
       : undefined,

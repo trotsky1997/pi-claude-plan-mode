@@ -94,6 +94,7 @@ export class PlanModeManager {
   markApprovedAndExited(): void {
     this.state.pendingImplementation = undefined;
     this.state.pendingApprovalRequest = undefined;
+    this.state.queuedStartupPrompt = undefined;
     this.state.enabled = false;
     this.state.hasExited = true;
     this.state.justReentered = false;
