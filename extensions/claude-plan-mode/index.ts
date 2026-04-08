@@ -1,6 +1,5 @@
 import type {
   ExtensionAPI,
-  ExtensionCommandContext,
   ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -11,6 +10,7 @@ import {
   getExecutionHandoffUserMessage,
   getFreshSessionImplementationPrompt,
   getFreshSessionQueuedToolResult,
+  getFreshSessionUserNotice,
   getInitialPlanTemplate,
   getKeepPlanningToolResult,
   getPlanModeContextMessage,
@@ -23,7 +23,6 @@ import {
 } from "./review-ui.js";
 import type { PlanApprovalAction } from "./review-ui.js";
 import { PlanModeManager } from "./plan-mode-manager.js";
-import type { PlanModeState } from "./schemas.js";
 
 type EnterPlanModeParams = {
   reason: string;
@@ -42,7 +41,6 @@ const STATE_ENTRY = "claude-plan-mode-state";
 const PLAN_CONTEXT_MESSAGE = "claude-plan-mode-context";
 const PLAN_STATUS_WIDGET = "claude-plan-mode-widget";
 const PLAN_STATUS_KEY = "claude-plan-mode-status";
-const INTERNAL_APPLY_FRESH_COMMAND = "__claude-plan-apply-fresh";
 const ASK_USER_TOOL_CANDIDATES = ["AskUserQuestion"] as const;
 // Keep the full planning control surface active outside plan mode so the model
 // can enter planning, update the plan, and request approval within one turn.
@@ -62,7 +60,17 @@ const READ_ONLY_TOOL_CANDIDATES = [
   "recursive_webfetch",
   "web_search",
 ] as const;
-const DEFAULT_EXECUTION_TOOLS = ["read", "bash", "edit", "write"] as const;
+const DEFAULT_EXECUTION_TOOLS = [
+  "read",
+  "bash",
+  "edit",
+  "write",
+  "TodoWrite",
+  "TaskCreate",
+  "TaskGet",
+  "TaskList",
+  "TaskUpdate",
+] as const;
 const PLAN_DIR = [".pi", "claude-plan-mode", "plans"] as const;
 
 export default function claudePlanMode(pi: ExtensionAPI): void {
@@ -80,9 +88,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
   const state = manager.getStateRef();
 
   const persistState = (): void => manager.persistState();
-  const getExecutionTools = (): string[] => manager.getExecutionTools();
   const getPlanModeTools = (): string[] => manager.getPlanModeTools();
-  const applyToolState = (): void => manager.applyToolState();
   const updateUi = (ctx: ExtensionContext): void => manager.updateUi(ctx);
   const getDisplayPath = (ctx: ExtensionContext, planPath: string): string =>
     manager.getDisplayPath(ctx, planPath);
@@ -179,59 +185,6 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
       if (state.planPath) {
         ctx.ui.notify(`Plan mode active: ${getDisplayPath(ctx, state.planPath)}`, "info");
       }
-    },
-  });
-
-  // Tools cannot call ctx.newSession(), so the fresh-session handoff needs an
-  // internal command trampoline. Pi does not currently support hidden commands.
-  pi.registerCommand(INTERNAL_APPLY_FRESH_COMMAND, {
-    handler: async (_args: string, ctx: ExtensionCommandContext) => {
-      const pending = manager.getPendingImplementation();
-      if (!pending || pending.mode !== "fresh") {
-        ctx.ui.notify("No queued fresh implementation session.", "warning");
-        return;
-      }
-
-      const previousSessionFile =
-        pending.previousSessionFile ?? ctx.sessionManager.getSessionFile();
-      const executionTools = getExecutionTools();
-      const prompt = getFreshSessionImplementationPrompt(
-        pending.planPath,
-        pending.plan,
-        previousSessionFile,
-      );
-      const inheritedState: PlanModeState = {
-        enabled: false,
-        planPath: pending.planPath,
-        previousActiveTools: executionTools,
-        lastReason: manager.getLastReason(),
-        hasExited: true,
-        justReentered: false,
-      };
-
-      const previousState = manager.getSnapshot();
-
-      manager.markApprovedAndExited();
-      persistState();
-
-      const newSessionResult = await ctx.newSession({
-        parentSession: previousSessionFile,
-        setup: async (sessionManager: any) => {
-          sessionManager.appendCustomEntry(STATE_ENTRY, inheritedState);
-        },
-      });
-
-      if (newSessionResult.cancelled) {
-        manager.restoreSnapshot(previousState);
-        persistState();
-        applyToolState();
-        updateUi(ctx);
-        ctx.ui.notify("Fresh implementation session cancelled. Approved handoff is still queued.", "info");
-        return;
-      }
-
-      ctx.ui.notify("Fresh implementation session created.", "info");
-      pi.sendUserMessage(prompt);
     },
   });
 
@@ -481,15 +434,15 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
       }
 
       if (action === "implement-fresh") {
-        manager.setPendingImplementation({
-          mode: "fresh",
-          plan,
+        const prompt = getFreshSessionImplementationPrompt(
           planPath,
-          previousSessionFile: ctx.sessionManager.getSessionFile(),
-        });
+          ctx.sessionManager.getSessionFile(),
+        );
+        const handoffNotice = getFreshSessionUserNotice(planPath, prompt);
+        manager.setPendingImplementation(undefined);
         exitPlanMode(ctx);
-        ctx.ui.notify("Plan approved. Fresh implementation session queued.", "info");
-        pi.sendUserMessage(`/${INTERNAL_APPLY_FRESH_COMMAND}`, { deliverAs: "steer" });
+        await ctx.ui.editor("Manual fresh-session handoff", handoffNotice);
+        ctx.ui.notify("Plan approved. Manual fresh-session handoff shown in the UI.", "info");
 
         return {
           content: [

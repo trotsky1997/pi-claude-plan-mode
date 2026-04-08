@@ -33,7 +33,17 @@ const READ_ONLY_TOOL_CANDIDATES = [
   "recursive_webfetch",
   "web_search",
 ] as const;
-const DEFAULT_EXECUTION_TOOLS = ["read", "bash", "edit", "write"] as const;
+const DEFAULT_EXECUTION_TOOLS = [
+  "read",
+  "bash",
+  "edit",
+  "write",
+  "TodoWrite",
+  "TaskCreate",
+  "TaskGet",
+  "TaskList",
+  "TaskUpdate",
+] as const;
 const PLAN_DIR = [".pi", "claude-plan-mode", "plans"] as const;
 
 const PlanApprovalResponseSchema = z.object({

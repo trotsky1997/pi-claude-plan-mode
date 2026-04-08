@@ -139,7 +139,7 @@ Canonical plan file: ${planPath}
 
 - Do not summarize the plan again.
 - Do not ask for confirmation again.
-- Use TaskCreate / TaskGet / TaskList / TaskUpdate to track non-trivial multi-step execution.
+- Prefer TodoWrite for multi-step execution tracking, and fall back to TaskCreate / TaskGet / TaskList / TaskUpdate only when you need task-level ownership or dependencies.
 - Start implementing now and make the first concrete tool call or code change.
 - Only pause if a genuinely new blocker appears that the approved plan did not cover.`;
 }
@@ -148,30 +148,44 @@ export function getExecutionHandoffUserMessage(planPath: string): string {
   return `Plan approved. Start implementing now.
 
 Do not restate the plan or ask for confirmation again.
-Use TaskCreate / TaskGet / TaskList / TaskUpdate to track non-trivial multi-step execution.
+Prefer TodoWrite for multi-step execution tracking, and fall back to TaskCreate / TaskGet / TaskList / TaskUpdate only when you need task-level ownership or dependencies.
 Make your next step a concrete implementation action.
 If you need the exact plan wording, read the canonical plan file at ${planPath}.`;
 }
 
-export function getFreshSessionQueuedToolResult(planPath: string): string {
+export function getFreshSessionQueuedToolResult(
+  planPath: string,
+): string {
   return `The user approved the plan and requested a fresh implementation session.
 
 Plan mode is complete for this session.
 - The approved plan remains at ${planPath}
-- A fresh implementation session has been queued
-- Do not continue implementing in this planning session`;
+- Fresh-session handoff is manual in this environment; do not try to auto-open a new session
+- Do not continue implementing in this planning session
+- The user has already been shown the manual handoff instructions in the UI`;
+}
+
+export function getFreshSessionUserNotice(
+  planPath: string,
+  prompt: string,
+): string {
+  return `Start a fresh implementation session manually.
+
+1. Run \`/new\`
+2. Copy the content below into the new session
+
+${prompt}`;
 }
 
 export function getFreshSessionImplementationPrompt(
   planPath: string,
-  plan: string,
   previousSessionPath?: string,
 ): string {
   const previous = previousSessionPath
     ? `\n\nIf you need to inspect the earlier planning transcript, the parent session file is: ${previousSessionPath}`
     : "";
 
-  return `Implement the following approved plan:\n\n${plan}\n\nCanonical plan file: ${planPath}\n\nYou are in a fresh implementation session. Treat the plan as already approved and start executing it now. Use TaskCreate / TaskGet / TaskList / TaskUpdate to track non-trivial multi-step execution. Do not re-open a planning loop unless genuinely new information forces it.${previous}`;
+  return `Read the approved plan file at ${planPath} and implement this plan. Treat the plan as already approved and start executing it now. Prefer TodoWrite for multi-step execution tracking, and fall back to TaskCreate / TaskGet / TaskList / TaskUpdate only when you need task-level ownership or dependencies. Do not re-open a planning loop unless genuinely new information forces it.${previous}`;
 }
 
 export function getEnterPlanModeToolPrompt(): string {
