@@ -160,21 +160,8 @@ export function getFreshSessionQueuedToolResult(
 
 Plan mode is complete for this session.
 - The approved plan remains at ${planPath}
-- Fresh-session handoff is manual in this environment; do not try to auto-open a new session
-- Do not continue implementing in this planning session
-- The user has already been shown the manual handoff instructions in the UI`;
-}
-
-export function getFreshSessionUserNotice(
-  planPath: string,
-  prompt: string,
-): string {
-  return `Start a fresh implementation session manually.
-
-1. Run \`/new\`
-2. Copy the content below into the new session
-
-${prompt}`;
+- A fresh implementation session has been queued
+- Do not continue implementing in this planning session`;
 }
 
 export function getFreshSessionImplementationPrompt(

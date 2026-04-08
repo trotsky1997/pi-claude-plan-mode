@@ -6,7 +6,7 @@ A Pi extension package that recreates the core feel of Claude Code's plan mode:
 - persistent per-session plan file
 - explicit `enter_plan_mode -> update_plan -> request_plan_approval` workflow
 - approval gate before normal coding tools are restored
-- optional manual fresh-session implementation handoff
+- optional fresh-session implementation handoff
 - plan-file continuity when re-entering planning later
 - safe plan review flow that opens the full plan in Pi's built-in editor and then asks for the next action
 - optional AskUserQuestion integration for Claude-style clarifying questions during planning
@@ -75,7 +75,7 @@ Suggested flow:
 4. `request_plan_approval` opens the full plan in Pi's built-in editor for review, then asks the user what to do next.
 5. If approved, the user can either keep implementing in the current session or start from a fresh implementation session.
 6. Current-session approval immediately injects a synthetic "start implementing now" user message so the agent resumes execution without waiting for another prompt, and that handoff now nudges the model to prefer `TodoWrite` for multi-step execution tracking.
-7. Fresh-session approval now uses a manual handoff: Pi shows the user a system-side handoff note that says to run `/new` and copy a short generated message containing the plan path plus an "implement this plan" prompt into the new session.
+7. Fresh-session approval can open a new session automatically and send the generated implementation prompt as a user message so the new session starts running immediately.
 
 ## Plan file location
 
@@ -153,7 +153,7 @@ So this package uses a pragmatic Pi-native design:
 - a custom `update_plan` tool is the only write path
 - if available, `AskUserQuestion` is the preferred clarifying-question path during planning
 - approval uses a safer built-in flow: review the plan in Pi's editor, then prompt for the next action
-- fresh-session handoff is done manually by asking the user to run `/new` and paste a generated prompt that points at the approved plan file path
+- fresh-session handoff is emulated with `ctx.newSession()` plus a queued extension command that sends the generated implementation prompt into the new session as a user message
 
 ## Recommended pairing
 

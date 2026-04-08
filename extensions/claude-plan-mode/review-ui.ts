@@ -22,7 +22,7 @@ const ACTIONS: ActionConfig[] = [
   {
     id: "implement-fresh",
     label: "Approve in fresh session",
-    description: "Use a manual /new handoff from the approved plan.",
+    description: "Open a new implementation session from the approved plan.",
   },
   {
     id: "edit-plan",
