@@ -106,7 +106,7 @@ export function getEnterPlanModeToolResult(planPath: string): string {
   return `Plan mode enabled.
 
 You are now in a read-only planning phase.
-- Explore with read-only tools only.
+- Explore with read-only tools only, including research tools such as web_search, webfetch, and recursive_webfetch when available.
 - Keep the canonical plan in: ${planPath}
 - Write a skeleton plan early, then keep rewriting the full plan as you learn more.
 - Ask targeted clarifying questions only when the code cannot answer them, and prefer AskUserQuestion when that tool is available.
@@ -139,7 +139,7 @@ Canonical plan file: ${planPath}
 
 - Do not summarize the plan again.
 - Do not ask for confirmation again.
-- If TaskCreate / TaskGet / TaskList / TaskUpdate are available, use them to track non-trivial multi-step execution.
+- Use TaskCreate / TaskGet / TaskList / TaskUpdate to track non-trivial multi-step execution.
 - Start implementing now and make the first concrete tool call or code change.
 - Only pause if a genuinely new blocker appears that the approved plan did not cover.`;
 }
@@ -148,7 +148,7 @@ export function getExecutionHandoffUserMessage(planPath: string): string {
   return `Plan approved. Start implementing now.
 
 Do not restate the plan or ask for confirmation again.
-If TaskCreate / TaskGet / TaskList / TaskUpdate are available, use them to track non-trivial multi-step execution.
+Use TaskCreate / TaskGet / TaskList / TaskUpdate to track non-trivial multi-step execution.
 Make your next step a concrete implementation action.
 If you need the exact plan wording, read the canonical plan file at ${planPath}.`;
 }
@@ -171,7 +171,7 @@ export function getFreshSessionImplementationPrompt(
     ? `\n\nIf you need to inspect the earlier planning transcript, the parent session file is: ${previousSessionPath}`
     : "";
 
-  return `Implement the following approved plan:\n\n${plan}\n\nCanonical plan file: ${planPath}\n\nYou are in a fresh implementation session. Treat the plan as already approved and start executing it now. If TaskCreate / TaskGet / TaskList / TaskUpdate are available, use them to track non-trivial multi-step execution. Do not re-open a planning loop unless genuinely new information forces it.${previous}`;
+  return `Implement the following approved plan:\n\n${plan}\n\nCanonical plan file: ${planPath}\n\nYou are in a fresh implementation session. Treat the plan as already approved and start executing it now. Use TaskCreate / TaskGet / TaskList / TaskUpdate to track non-trivial multi-step execution. Do not re-open a planning loop unless genuinely new information forces it.${previous}`;
 }
 
 export function getEnterPlanModeToolPrompt(): string {

@@ -19,9 +19,9 @@ This package intentionally mirrors the parts of Claude Code plan mode that map w
 1. `plan` becomes a real extension state, not just a user prompt.
 2. The agent gets a strong planning prompt with a canonical plan artifact.
 3. Normal file-editing tools are removed during planning.
-4. Only read-only tools plus plan tools stay active.
+4. Only read-only tools plus plan tools stay active, including research tools like `web_search`, `webfetch`, and `recursive_webfetch` when installed.
 5. If `AskUserQuestion` is installed, plan mode keeps it active for structured clarifying questions.
-6. Bash is filtered to block obvious mutating commands.
+6. Bash stays available for read-only inspection and is filtered only to block obvious mutating commands.
 7. The model must use `request_plan_approval` instead of asking for approval in plain text.
 8. Approval can continue in-place or branch into a fresh implementation session.
 
@@ -138,6 +138,7 @@ What Pi can do well here:
 - block tool calls
 - persist plan-mode state
 - show approval dialogs
+- share the same planning runtime pieces with other packages through helper modules such as `PlanModeManager` and the managed-runtime extension factory
 
 What Pi cannot fully mirror without deeper core changes:
 

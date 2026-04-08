@@ -1,12 +1,8 @@
-import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
-import { withFileMutationQueue } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import {
   getApprovedPlanToolResult,
@@ -26,27 +22,8 @@ import {
   showPlanApprovalPanel,
 } from "./review-ui.js";
 import type { PlanApprovalAction } from "./review-ui.js";
-
-type PlanModeState = {
-  enabled: boolean;
-  planPath?: string;
-  previousActiveTools?: string[];
-  lastReason?: string;
-  hasExited?: boolean;
-  justReentered?: boolean;
-  pendingImplementation?: {
-    mode: "fresh";
-    plan: string;
-    planPath: string;
-    previousSessionFile?: string;
-  };
-};
-
-type CustomEntryWithData = {
-  type: string;
-  customType?: string;
-  data?: unknown;
-};
+import { PlanModeManager } from "./plan-mode-manager.js";
+import type { PlanModeState } from "./schemas.js";
 
 type EnterPlanModeParams = {
   reason: string;
@@ -75,210 +52,59 @@ const PLAN_TRANSITION_TOOLS = [
   "request_plan_approval",
 ] as const;
 const PLAN_ONLY_TOOLS = [] as const;
-const READ_ONLY_TOOL_CANDIDATES = ["read", "bash", "grep", "find", "ls"] as const;
+const READ_ONLY_TOOL_CANDIDATES = [
+  "read",
+  "bash",
+  "grep",
+  "find",
+  "ls",
+  "webfetch",
+  "recursive_webfetch",
+  "web_search",
+] as const;
 const DEFAULT_EXECUTION_TOOLS = ["read", "bash", "edit", "write"] as const;
 const PLAN_DIR = [".pi", "claude-plan-mode", "plans"] as const;
 
-function createEmptyState(): PlanModeState {
-  return { enabled: false, hasExited: false, justReentered: false };
-}
-
-function isPlanState(value: unknown): value is PlanModeState {
-  if (!value || typeof value !== "object") return false;
-  const input = value as Partial<PlanModeState>;
-  return typeof input.enabled === "boolean";
-}
-
-function normalizeToolList(pi: ExtensionAPI, tools: string[] | undefined): string[] {
-  const available = new Set(pi.getAllTools().map((tool) => tool.name));
-  return (tools ?? []).filter((tool) => available.has(tool));
-}
-
-function stripApprovalOnlyTools(tools: string[]): string[] {
-  return tools.filter((tool) => !PLAN_ONLY_TOOLS.includes(tool as (typeof PLAN_ONLY_TOOLS)[number]));
-}
-
-function getDisplayPath(ctx: ExtensionContext, planPath: string): string {
-  const rel = relative(ctx.cwd, planPath);
-  return rel && !rel.startsWith("..") ? rel : planPath;
-}
-
-async function readPlanFile(planPath: string): Promise<string> {
-  try {
-    return await readFile(planPath, "utf8");
-  } catch {
-    return "";
-  }
-}
-
-async function writePlanFile(planPath: string, content: string): Promise<void> {
-  const normalized = content.endsWith("\n") ? content : `${content}\n`;
-  await mkdir(dirname(planPath), { recursive: true });
-  await withFileMutationQueue(planPath, async () => {
-    await writeFile(planPath, normalized, "utf8");
-  });
-}
-
-async function ensurePlanFile(
-  ctx: ExtensionContext,
-  preferredPath?: string,
-): Promise<string> {
-  const sessionId = ctx.sessionManager.getSessionId();
-  const planPath = preferredPath
-    ? resolve(preferredPath)
-    : resolve(ctx.cwd, ...PLAN_DIR, `${sessionId}.md`);
-  await mkdir(dirname(planPath), { recursive: true });
-  if (!existsSync(planPath)) {
-    await writePlanFile(planPath, getInitialPlanTemplate());
-  }
-  return planPath;
-}
-
 export default function claudePlanMode(pi: ExtensionAPI): void {
-  let state: PlanModeState = createEmptyState();
+  const manager = new PlanModeManager(pi, {
+    stateEntry: STATE_ENTRY,
+    widgetKey: PLAN_STATUS_WIDGET,
+    statusKey: PLAN_STATUS_KEY,
+    askUserToolCandidates: ASK_USER_TOOL_CANDIDATES,
+    planTransitionTools: PLAN_TRANSITION_TOOLS,
+    planOnlyTools: PLAN_ONLY_TOOLS,
+    readOnlyToolCandidates: READ_ONLY_TOOL_CANDIDATES,
+    defaultExecutionTools: DEFAULT_EXECUTION_TOOLS,
+    planDir: PLAN_DIR,
+  });
+  const state = manager.getStateRef();
 
-  function persistState(): void {
-    pi.appendEntry<PlanModeState>(STATE_ENTRY, state);
-  }
-
-  function getExecutionTools(): string[] {
-    const saved = state.previousActiveTools && state.previousActiveTools.length > 0
-      ? state.previousActiveTools
-      : stripApprovalOnlyTools(pi.getActiveTools());
-    const normalized = normalizeToolList(pi, [
-      ...stripApprovalOnlyTools(saved),
-      ...PLAN_TRANSITION_TOOLS,
-    ]);
-    if (normalized.length > 0) return normalized;
-    return normalizeToolList(pi, [...DEFAULT_EXECUTION_TOOLS, ...PLAN_TRANSITION_TOOLS]);
-  }
-
-  function getPlanModeTools(): string[] {
-    const available = new Set(pi.getAllTools().map((tool) => tool.name));
-    return [
-      ...READ_ONLY_TOOL_CANDIDATES,
-      ...ASK_USER_TOOL_CANDIDATES,
-      ...PLAN_TRANSITION_TOOLS,
-      ...PLAN_ONLY_TOOLS,
-    ].filter((tool) =>
-      available.has(tool),
-    );
-  }
-
-  function applyToolState(): void {
-    if (state.enabled) {
-      pi.setActiveTools(getPlanModeTools());
-      return;
-    }
-    pi.setActiveTools(getExecutionTools());
-  }
-
-  function updateUi(ctx: ExtensionContext): void {
-    if (!state.enabled || !state.planPath) {
-      ctx.ui.setStatus(PLAN_STATUS_KEY, undefined);
-      ctx.ui.setWidget(PLAN_STATUS_WIDGET, undefined);
-      return;
-    }
-
-    ctx.ui.setStatus(PLAN_STATUS_KEY, "plan:on");
-    ctx.ui.setWidget(PLAN_STATUS_WIDGET, [
-      "Claude-style plan mode is active.",
-      `Plan file: ${getDisplayPath(ctx, state.planPath)}`,
-      "Only read-only tools plus the planning/question tools are enabled.",
-    ]);
-  }
-
-  async function enterPlanMode(
+  const persistState = (): void => manager.persistState();
+  const getExecutionTools = (): string[] => manager.getExecutionTools();
+  const getPlanModeTools = (): string[] => manager.getPlanModeTools();
+  const applyToolState = (): void => manager.applyToolState();
+  const updateUi = (ctx: ExtensionContext): void => manager.updateUi(ctx);
+  const getDisplayPath = (ctx: ExtensionContext, planPath: string): string =>
+    manager.getDisplayPath(ctx, planPath);
+  const readPlanFile = async (planPath: string): Promise<string> =>
+    manager.readPlanFile(planPath);
+  const writePlanFile = async (planPath: string, content: string): Promise<void> =>
+    manager.writePlanFile(planPath, content);
+  const ensurePlanFile = async (
+    ctx: ExtensionContext,
+    preferredPath?: string,
+  ): Promise<string> => manager.ensurePlanFile(ctx, preferredPath);
+  const enterPlanMode = async (
     ctx: ExtensionContext,
     reason?: string,
-  ): Promise<string> {
-    const planPath = await ensurePlanFile(ctx, state.planPath);
-    if (!state.enabled) {
-      state.previousActiveTools = normalizeToolList(
-        pi,
-        stripApprovalOnlyTools(pi.getActiveTools()),
-      );
-    }
-    const reentering = !!state.hasExited && existsSync(planPath);
-    state.enabled = true;
-    state.planPath = planPath;
-    state.lastReason = reason?.trim() || state.lastReason;
-    state.justReentered = reentering;
-    state.pendingImplementation = undefined;
-    persistState();
-    applyToolState();
-    updateUi(ctx);
-    return planPath;
-  }
-
-  function exitPlanMode(ctx: ExtensionContext): void {
-    state.enabled = false;
-    state.hasExited = true;
-    state.justReentered = false;
-    persistState();
-    applyToolState();
-    updateUi(ctx);
-  }
-
-  async function restoreFromBranch(ctx: ExtensionContext): Promise<void> {
-    await restoreFromBranchWithOptions(ctx);
-  }
-
-  async function restoreFromBranchWithOptions(
+  ): Promise<string> => manager.enterPlanMode(ctx, reason);
+  const exitPlanMode = (ctx: ExtensionContext): void => manager.exitPlanMode(ctx);
+  const restoreFromBranch = async (ctx: ExtensionContext): Promise<void> =>
+    manager.restoreFromBranch(ctx);
+  const restoreFromBranchWithOptions = async (
     ctx: ExtensionContext,
     options?: { allowFlagBootstrap?: boolean },
-  ): Promise<void> {
-    state = createEmptyState();
-    let changed = false;
-
-    for (const entry of ctx.sessionManager.getBranch()) {
-      const customEntry = entry as CustomEntryWithData;
-      if (
-        customEntry.type === "custom" &&
-        customEntry.customType === STATE_ENTRY &&
-        isPlanState(customEntry.data)
-      ) {
-        state = {
-          enabled: customEntry.data.enabled,
-          planPath: customEntry.data.planPath,
-          previousActiveTools: normalizeToolList(
-            pi,
-            customEntry.data.previousActiveTools,
-          ),
-          lastReason: customEntry.data.lastReason,
-          hasExited: customEntry.data.hasExited,
-          justReentered: customEntry.data.justReentered,
-          pendingImplementation: customEntry.data.pendingImplementation,
-        };
-      }
-    }
-
-    if (
-      options?.allowFlagBootstrap &&
-      pi.getFlag("claude-plan") === true &&
-      !state.enabled &&
-      !state.hasExited &&
-      !state.planPath
-    ) {
-      state.previousActiveTools = normalizeToolList(
-        pi,
-        stripApprovalOnlyTools(pi.getActiveTools()),
-      );
-      state.enabled = true;
-      changed = true;
-    }
-
-    if (state.enabled || state.planPath) {
-      const planPath = await ensurePlanFile(ctx, state.planPath);
-      if (state.planPath !== planPath) changed = true;
-      state.planPath = planPath;
-    }
-
-    if (changed) persistState();
-
-    applyToolState();
-    updateUi(ctx);
-  }
+  ): Promise<void> => manager.restoreFromBranch(ctx, options);
 
   pi.registerFlag("claude-plan", {
     description: "Start Pi in Claude-style planning mode",
@@ -360,7 +186,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
   // internal command trampoline. Pi does not currently support hidden commands.
   pi.registerCommand(INTERNAL_APPLY_FRESH_COMMAND, {
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
-      const pending = state.pendingImplementation;
+      const pending = manager.getPendingImplementation();
       if (!pending || pending.mode !== "fresh") {
         ctx.ui.notify("No queued fresh implementation session.", "warning");
         return;
@@ -378,29 +204,14 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         enabled: false,
         planPath: pending.planPath,
         previousActiveTools: executionTools,
-        lastReason: state.lastReason,
+        lastReason: manager.getLastReason(),
         hasExited: true,
         justReentered: false,
       };
 
-      const previousState: PlanModeState = {
-        enabled: state.enabled,
-        planPath: state.planPath,
-        previousActiveTools: state.previousActiveTools
-          ? [...state.previousActiveTools]
-          : undefined,
-        lastReason: state.lastReason,
-        hasExited: state.hasExited,
-        justReentered: state.justReentered,
-        pendingImplementation: state.pendingImplementation
-          ? { ...state.pendingImplementation }
-          : undefined,
-      };
+      const previousState = manager.getSnapshot();
 
-      state.pendingImplementation = undefined;
-      state.enabled = false;
-      state.hasExited = true;
-      state.justReentered = false;
+      manager.markApprovedAndExited();
       persistState();
 
       const newSessionResult = await ctx.newSession({
@@ -411,7 +222,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
       });
 
       if (newSessionResult.cancelled) {
-        state = previousState;
+        manager.restoreSnapshot(previousState);
         persistState();
         applyToolState();
         updateUi(ctx);
@@ -517,7 +328,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
       }
 
       const planPath = state.planPath ?? (await ensurePlanFile(ctx));
-      state.planPath = planPath;
+      manager.setPlanPath(planPath);
       await writePlanFile(planPath, params.content);
       persistState();
       updateUi(ctx);
@@ -575,7 +386,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
       }
 
       const planPath = state.planPath ?? (await ensurePlanFile(ctx));
-      state.planPath = planPath;
+      manager.setPlanPath(planPath);
       let plan = await readPlanFile(planPath);
       if (!plan.trim()) {
         throw new Error(
@@ -670,12 +481,12 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
       }
 
       if (action === "implement-fresh") {
-        state.pendingImplementation = {
+        manager.setPendingImplementation({
           mode: "fresh",
           plan,
           planPath,
           previousSessionFile: ctx.sessionManager.getSessionFile(),
-        };
+        });
         exitPlanMode(ctx);
         ctx.ui.notify("Plan approved. Fresh implementation session queued.", "info");
         pi.sendUserMessage(`/${INTERNAL_APPLY_FRESH_COMMAND}`, { deliverAs: "steer" });
@@ -695,7 +506,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         };
       }
 
-      state.pendingImplementation = undefined;
+      manager.setPendingImplementation(undefined);
       exitPlanMode(ctx);
       ctx.ui.notify("Plan approved. Normal tools are active again.", "info");
       pi.sendUserMessage(getExecutionHandoffUserMessage(planPath), {
@@ -764,11 +575,10 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
     if (!state.enabled) return;
 
     const planPath = state.planPath ?? (await ensurePlanFile(ctx, state.planPath));
-    state.planPath = planPath;
-    const planExists = existsSync(planPath) && (await readPlanFile(planPath)).trim().length > 0;
-    const isReentry = !!state.justReentered;
-    if (state.justReentered) {
-      state.justReentered = false;
+    manager.setPlanPath(planPath);
+    const planExists = (await readPlanFile(planPath)).trim().length > 0;
+    const isReentry = manager.consumeJustReentered();
+    if (isReentry) {
       persistState();
     }
 
@@ -777,7 +587,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         customType: PLAN_CONTEXT_MESSAGE,
         content: getPlanModeContextMessage(planPath, planExists, {
           isReentry,
-          lastReason: state.lastReason,
+          lastReason: manager.getLastReason(),
         }),
         display: false,
       },

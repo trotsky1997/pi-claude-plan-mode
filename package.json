@@ -3,12 +3,35 @@
   "version": "0.1.0",
   "description": "Claude-style planning mode for Pi with a persistent plan file and approval gate.",
   "type": "module",
-  "keywords": ["pi-package"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/trotsky1997/pi-claude-plan-mode.git"
+  },
+  "homepage": "https://github.com/trotsky1997/pi-claude-plan-mode",
+  "bugs": {
+    "url": "https://github.com/trotsky1997/pi-claude-plan-mode/issues"
+  },
+  "keywords": [
+    "pi-package"
+  ],
+  "exports": {
+    "./managed-runtime": "./extensions/claude-plan-mode/managed-runtime.ts",
+    "./plan-mode-manager": "./extensions/claude-plan-mode/plan-mode-manager.ts",
+    "./schemas": "./extensions/claude-plan-mode/schemas.ts"
+  },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
     "@sinclair/typebox": "*"
   },
   "pi": {
-    "extensions": ["./extensions/claude-plan-mode"]
+    "extensions": [
+      "./extensions/claude-plan-mode"
+    ]
+  },
+  "dependencies": {
+    "zod": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2"
   }
 }
