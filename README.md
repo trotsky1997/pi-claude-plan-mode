@@ -49,6 +49,7 @@ The approval review flow lives in:
 - `/claude-plan show` - open the current plan file in Pi's editor
 - `/claude-plan edit` - same as `show`, but meant as an editing entrypoint
 - `/claude-plan apply-fresh` - if a fresh-session approval is pending, open the new implementation session and trigger the carried implementation prompt from the new session startup flow
+- `/claude-plan debug` - print the persisted `previousActiveTools`, current active tools, execution restore tools, and plan-mode tool set
 - `/claude-plan some task here` - enable plan mode and immediately send that task to the agent
 
 Shortcut:

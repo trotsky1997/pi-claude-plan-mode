@@ -127,26 +127,75 @@ export class PlanModeManager {
 
   normalizeToolList(tools: string[] | undefined): string[] {
     const available = new Set(this.pi.getAllTools().map((tool: { name: string }) => tool.name));
-    return (tools ?? []).filter((tool) => available.has(tool));
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+    for (const tool of tools ?? []) {
+      if (!available.has(tool) || seen.has(tool)) continue;
+      seen.add(tool);
+      normalized.push(tool);
+    }
+    return normalized;
   }
 
   stripApprovalOnlyTools(tools: string[]): string[] {
     return tools.filter((tool) => !this.options.planOnlyTools.includes(tool));
   }
 
-  getExecutionTools(): string[] {
-    const saved = this.state.previousActiveTools && this.state.previousActiveTools.length > 0
-      ? this.state.previousActiveTools
-      : this.stripApprovalOnlyTools(this.pi.getActiveTools());
-    const normalized = this.normalizeToolList([
-      ...this.stripApprovalOnlyTools(saved),
-      ...this.options.planTransitionTools,
-    ]);
-    if (normalized.length > 0) return normalized;
+  private getDefaultExecutionSnapshot(): string[] {
+    return this.normalizeToolList([...this.options.defaultExecutionTools]);
+  }
+
+  private getRequiredExecutionTools(): string[] {
+    return this.normalizeToolList(
+      this.options.defaultExecutionTools.filter((tool) => tool === "edit" || tool === "write"),
+    );
+  }
+
+  private normalizeExecutionSnapshot(tools: string[] | undefined): string[] {
+    return this.normalizeToolList(this.stripApprovalOnlyTools(tools ?? []));
+  }
+
+  private isHealthyExecutionSnapshot(tools: string[] | undefined): boolean {
+    const normalized = this.normalizeExecutionSnapshot(tools);
+    if (normalized.length === 0) return false;
+
+    const required = this.getRequiredExecutionTools();
+    return required.length === 0 || required.every((tool) => normalized.includes(tool));
+  }
+
+  private captureExecutionSnapshot(tools: string[] | undefined): string[] {
+    return this.isHealthyExecutionSnapshot(tools)
+      ? this.normalizeExecutionSnapshot(tools)
+      : this.getDefaultExecutionSnapshot();
+  }
+
+  private buildExecutionTools(snapshot: string[] | undefined): string[] {
     return this.normalizeToolList([
-      ...this.options.defaultExecutionTools,
+      ...this.captureExecutionSnapshot(snapshot),
       ...this.options.planTransitionTools,
     ]);
+  }
+
+  private healPreviousActiveTools(): boolean {
+    if (!this.state.previousActiveTools || this.state.previousActiveTools.length === 0) {
+      return false;
+    }
+
+    const current = this.normalizeExecutionSnapshot(this.state.previousActiveTools);
+    const healed = this.captureExecutionSnapshot(this.state.previousActiveTools);
+    const unchanged = current.length === healed.length
+      && current.every((tool, index) => healed[index] === tool);
+    if (unchanged) return false;
+
+    this.state.previousActiveTools = healed;
+    return true;
+  }
+
+  getExecutionTools(): string[] {
+    const source = this.state.previousActiveTools && this.state.previousActiveTools.length > 0
+      ? this.state.previousActiveTools
+      : this.pi.getActiveTools();
+    return this.buildExecutionTools(source);
   }
 
   getPlanModeTools(): string[] {
@@ -228,9 +277,7 @@ export class PlanModeManager {
   ): Promise<string> {
     const planPath = await this.ensurePlanFile(ctx, this.state.planPath);
     if (!this.state.enabled) {
-      this.state.previousActiveTools = this.normalizeToolList(
-        this.stripApprovalOnlyTools(this.pi.getActiveTools()),
-      );
+      this.state.previousActiveTools = this.captureExecutionSnapshot(this.pi.getActiveTools());
     }
     const reentering = !!this.state.hasExited && existsSync(planPath);
     this.state.enabled = true;
@@ -272,6 +319,8 @@ export class PlanModeManager {
       }
     }
 
+    if (this.healPreviousActiveTools()) changed = true;
+
     if (
       options?.allowFlagBootstrap
       && this.pi.getFlag("claude-plan") === true
@@ -279,9 +328,7 @@ export class PlanModeManager {
       && !this.state.hasExited
       && !this.state.planPath
     ) {
-      this.state.previousActiveTools = this.normalizeToolList(
-        this.stripApprovalOnlyTools(this.pi.getActiveTools()),
-      );
+      this.state.previousActiveTools = this.captureExecutionSnapshot(this.pi.getActiveTools());
       this.state.enabled = true;
       changed = true;
     }

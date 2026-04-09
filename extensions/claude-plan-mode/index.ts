@@ -219,6 +219,7 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         { value: "show", label: "show" },
         { value: "edit", label: "edit" },
         { value: "apply-fresh", label: "apply-fresh" },
+        { value: "debug", label: "debug" },
       ];
       const filtered = items.filter((item) => item.value.startsWith(prefix));
       return filtered.length > 0 ? filtered : null;
@@ -313,6 +314,27 @@ export default function claudePlanMode(pi: ExtensionAPI): void {
         }
 
         ctx.ui.notify("Fresh implementation session created.", "info");
+        return;
+      }
+
+      if (lowered === "debug") {
+        const lines = [
+          "Claude plan debug",
+          "",
+          `enabled: ${String(state.enabled)}`,
+          `autoApprove: ${String(state.autoApprove)}`,
+          `planPath: ${state.planPath ?? "(none)"}`,
+          `previousActiveTools: ${(state.previousActiveTools ?? []).join(", ") || "(empty)"}`,
+          `activeTools: ${pi.getActiveTools().join(", ") || "(empty)"}`,
+          `executionTools: ${getExecutionTools().join(", ") || "(empty)"}`,
+          `planModeTools: ${getPlanModeTools().join(", ") || "(empty)"}`,
+        ];
+
+        if (ctx.hasUI) {
+          await ctx.ui.editor("Claude plan debug", lines.join("\n"));
+        } else {
+          console.log(lines.join("\n"));
+        }
         return;
       }
 
